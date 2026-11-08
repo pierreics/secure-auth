@@ -1,7 +1,7 @@
 # Secure Auth — Build & Break
 
 A small authentication server built with **Node.js** and **Express**, used as a
-hands-on project to learn backend development *and* web security from both
+hands-on project to learn backend development _and_ web security from both
 sides: I build each feature, then I attack it with my own scripts, then I
 harden it — documenting every step.
 
@@ -43,15 +43,14 @@ so each finding is reproducible.
 
 | Vulnerability | Type | Exploit | Status |
 | --- | --- | --- | --- |
-| Stored XSS in the vault | XSS | `attacks/xss_vault.py` | 🔜 Planned |
+| [Stored XSS in the vault](docs/xss-vault.md) | XSS | `attacks/xss_vault.py` | 🛠️ In progress |
 | No rate limiting on login | Brute force | `attacks/brute_login.py` | 🔜 Planned |
 | No CSRF protection | CSRF | — | 🔜 Planned |
 | Duplicate username on register | Logic flaw | — | 🔜 Planned |
 | Weak session cookie flags & fallback secret | Misconfig | — | 🔜 Planned |
 | Hardcoded admin password in source | Hardcoded credentials | — | 🔜 Planned |
-
+ 
 *(Status: 🔜 Planned · 🛠️ In progress · ✅ Fixed — updated as I go.)*
-
 ## Project structure
 
 ```
