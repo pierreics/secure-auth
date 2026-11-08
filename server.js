@@ -51,15 +51,15 @@ function validaPassword(password) {
 }
 
 app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/home.html");
+  res.sendFile(__dirname + "/views/home.html");
 });
 
 app.get("/register", (req, res) => {
-  res.sendFile(__dirname + "/register.html");
+  res.sendFile(__dirname + "/views/register.html");
 });
 
 app.get("/login", (req, res) => {
-  res.sendFile(__dirname + "/login.html");
+  res.sendFile(__dirname + "/views/login.html");
 });
 
 app.post("/register", async (req, res) => {
@@ -118,7 +118,7 @@ app.post("/login", async (req, res) => {
 
 app.get("/admin", (req, res) => {
   if (req.session.role === "admin") {
-    res.sendFile(__dirname + "/admin.html");
+    res.sendFile(__dirname + "/views/admin.html");
   } else {
     res.send("Area riservata agli admin");
   }
@@ -126,7 +126,7 @@ app.get("/admin", (req, res) => {
 
 app.get("/user", (req, res) => {
   if (req.session.utenteloggato === true) {
-    res.sendFile(__dirname + "/user.html");
+    res.sendFile(__dirname + "/views/user.html");
   } else {
     res.redirect("/login");
   }
@@ -146,7 +146,7 @@ app
   .route("/changepassword")
   .get((req, res) => {
     if (req.session.utenteloggato === true) {
-      res.sendFile(__dirname + "/changepassword.html");
+      res.sendFile(__dirname + "/views/changepassword.html");
     } else {
       res.redirect("/login");
     }
@@ -225,7 +225,7 @@ app
     if (!req.session.utenteloggato) {
       return res.redirect("/");
     }
-    res.sendFile(__dirname + "/deleteaccount.html");
+    res.sendFile(__dirname + "/views/deleteaccount.html");
   })
   .post(async (req, res) => {
     if (!req.session.utenteloggato) {
