@@ -18,6 +18,7 @@ app.use(
 );
 
 const fintoDB = [];
+//Passwords stored with bcrypt, a slow, salted hash which makes brute-force attacks expensive and defeats the rainbow-table attacks
 const admin = async () => {
   const hash = await bcrypt.hash("Password123!", 10);
   fintoDB.push({
@@ -34,6 +35,7 @@ let ghost = "";
   ghost = await bcrypt.hash("dummy_password", 10);
 })();
 
+//Password complexity policy : enforces length and character variety to reduce the risk of weak, easily-guessable passwords
 function validaPassword(password) {
   if (
     typeof password !== "string" ||
@@ -92,6 +94,8 @@ app.post("/login", async (req, res) => {
       (utente) => utente.username === username,
     );
     if (!utentetrovato) {
+      //Mitigates timing-based user enumeration : even when the user does not exist, we run a dummy bcrypt.compare against a fixed hash so the response time stays constant and does not leak whether the account exists.
+      //Generic error message : does not reveal whether the username or the password was wrong to prevent username enumeration.
       await bcrypt.compare(password, ghost);
       return res.send("Username o password errati");
     }
@@ -117,6 +121,7 @@ app.post("/login", async (req, res) => {
 });
 
 app.get("/admin", (req, res) => {
+  // Access control: admin-only area -- checks the user role.
   if (req.session.role === "admin") {
     res.sendFile(__dirname + "/views/admin.html");
   } else {
@@ -152,6 +157,7 @@ app
     }
   })
   .post(async (req, res) => {
+    // Access control: protected route — requires an authenticated session.
     if (!req.session.utenteloggato) {
       return res.redirect("/login");
     }
