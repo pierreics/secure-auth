@@ -2,6 +2,7 @@ const express = require("express");
 const session = require("express-session");
 const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
+const db = require("./database");
 const app = express();
 
 app.use(express.urlencoded({ extended: true }));
@@ -9,7 +10,7 @@ app.use(
   session({
     store: new filestore({
       path: "./sessions",
-      retires: 0,
+      retriesz: 0,
     }),
     secret: process.env.SECRET_KEY || "chiave_provvisoria",
     saveUninitialized: false,
@@ -18,18 +19,6 @@ app.use(
 );
 
 const fintoDB = [];
-//Passwords stored with bcrypt, a slow, salted hash which makes brute-force attacks expensive and defeats the rainbow-table attacks
-const admin = async () => {
-  const admin_password = process.env.ADMIN_PASSWORD || "fakepassword";
-  const hash = await bcrypt.hash(admin_password, 10);
-  fintoDB.push({
-    username: "admin",
-    password: hash,
-    role: "admin",
-    secret: "",
-  });
-};
-admin();
 
 let ghost = "";
 (async () => {
@@ -75,13 +64,18 @@ app.post("/register", async (req, res) => {
   }
   try {
     const hash = await bcrypt.hash(password, 10);
-    fintoDB.push({
-      username: username,
-      password: hash,
-      role: "user",
-      secret: "",
+    const query = `INSERT INTO users (username, password, role, secret) VALUES (?, ?, ?, ?)`;
+    db.run(query, [username, hash, "user", ""], (err) => {
+      if (err) {
+        if (err.message.includes("UNIQUE")) {
+          return res.send("Username già occupato");
+        } else {
+          console.error(err);
+          return res.send("Errore nella registrazione");
+        }
+      }
+      res.send("Registrazione effettuata con successo");
     });
-    res.send("Registrazione effettuata con successo");
   } catch (err) {
     res.send("Errore nell'encrypting della password");
   }
@@ -91,33 +85,35 @@ app.post("/login", async (req, res) => {
   const username = req.body.username;
   const password = req.body.password;
   try {
-    const utentetrovato = fintoDB.find(
-      (utente) => utente.username === username,
-    );
-    if (!utentetrovato) {
-      //Mitigates timing-based user enumeration : even when the user does not exist, we run a dummy bcrypt.compare against a fixed hash so the response time stays constant and does not leak whether the account exists.
-      //Generic error message : does not reveal whether the username or the password was wrong to prevent username enumeration.
-      await bcrypt.compare(password, ghost);
-      return res.send("Username o password errati");
-    }
-    const passwordtrovata = await bcrypt.compare(
-      password,
-      utentetrovato.password,
-    );
-    if (passwordtrovata) {
-      req.session.utenteloggato = true;
-      req.session.role = utentetrovato.role;
-      req.session.username = utentetrovato.username;
-      if (req.session.role === "admin") {
-        res.redirect("/admin");
-      } else {
-        res.redirect("/user");
+    const query = `SELECT * FROM users WHERE username = ?`;
+    db.get(query, [username], async (err, row) => {
+      if (err) {
+        console.error(err);
+        return res.send("Errore nel database");
       }
-    } else {
-      res.send("Username o password errati");
-    }
+      if (!row) {
+        //Mitigates timing-based user enumeration : even when the user does not exist, we run a dummy bcrypt.compare against a fixed hash so the response time stays constant and does not leak whether the account exists.
+        //Generic error message : does not reveal whether the username or the password was wrong to prevent username enumeration.
+        await bcrypt.compare(password, ghost);
+        return res.send("Username o password errati");
+      }
+      const passwordtrovata = await bcrypt.compare(password, row.password);
+      if (passwordtrovata) {
+        req.session.utenteloggato = true;
+        req.session.role = row.role;
+        req.session.username = row.username;
+        if (req.session.role === "admin") {
+          res.redirect("/admin");
+        } else {
+          res.redirect("/user");
+        }
+      } else {
+        res.send("Username o password errati");
+      }
+    });
   } catch (err) {
     console.log("\n\n\n\n\nErrore nella comparazione delle password");
+    res.send("errore interno");
   }
 });
 
@@ -133,10 +129,12 @@ app.get("/admin", (req, res) => {
 app.get("/adminsecrets", (req, res) => {
   if (req.session.role === "admin") {
     let html = "<h2>Area riservata admin</h2><ul>";
-    for (const u of fintoDB) {
-      html += `<li>${u.username} : ${u.secret}</li>`;
-    }
-    html += "</ul>";
+    query = "SELECT username, secret FROM users";
+    db.all(query, [], (err, rows) => {
+      for (const u of rows) {
+        html += `<li>${u.username} : ${u.secret}<li>`;
+      }
+    });
     res.send(html);
   } else {
     res.send("Area riservata agli admin");
@@ -184,25 +182,34 @@ app
       );
     }
     try {
-      const utente = fintoDB.find(
-        (cercautente) => cercautente.username === req.session.username,
-      );
-      if (!utente) {
-        return req.session.destroy(() => {
-          res.send("Utente non trovato nel db, rifai il login");
-        });
+      if (newpassword1 !== newpassword2) {
+        return res.send("Le due password non corrisopondono");
       }
-      const esito = await bcrypt.compare(oldpassword, utente.password);
-      if (esito) {
-        if (newpassword1 === newpassword2) {
-          utente.password = await bcrypt.hash(newpassword1, 10);
-          res.send("Password cambiata");
-        } else {
-          res.send("Le due nuove password non corrispondono");
+      let query = "SELECT password FROM users WHERE username = ?";
+      db.get(query, [req.session.username], async (err, row) => {
+        if (err) {
+          console.log("Erroe nella ricerca della password nel db");
+          return res.send("Errore interno");
         }
-      } else {
-        res.send("Password non corretta");
-      }
+        if (!row) {
+          return req.session.destroy((err) => {
+            res.send("Utente non trovato, rifare il login");
+          });
+        }
+        const esito = await bcrypt.compare(oldpassword, row.password);
+        if (!esito) {
+          return res.send("Le due password non corrispondono");
+        }
+        let query = "UPDATE users SET password = ? WHERE username = ?";
+        const hash = await bcrypt.hash(newpassword1, 10);
+        db.run(query, [hash, req.session.username], (err) => {
+          if (err) {
+            console.log("Errore nell'aggiornamento della password");
+            return res.send("Errore interno");
+          }
+          return res.send("Aggiornamento fatto");
+        });
+      });
     } catch (err) {
       res.send("Errore nell'hashing");
     }
@@ -214,34 +221,43 @@ app
     if (!req.session.utenteloggato) {
       return res.redirect("/");
     }
-    const utente = fintoDB.find(
-      (user) => user.username === req.session.username,
-    );
-    if (!utente)
-      return req.session.destroy(() =>
-        res.send("Utente non trovato, rifai login."),
-      );
-    if (utente.secret === "") {
-      res.send("L'utente non ha ancora inserito alcun segreto");
-    } else {
-      res.send(`segreto : ${utente.secret}`);
-    }
+    const query = "SELECT * FROM users WHERE username = ?";
+    db.get(query, [req.session.username], (err, row) => {
+      if (!row) {
+        return req.session.destroy(() => {
+          res.redirect("/");
+        });
+      } else {
+        res.send("Secret : " + row.secret);
+      }
+    });
   })
   .post((req, res) => {
     if (!req.session.utenteloggato) {
       return res.redirect("/");
     }
-    let segreto = req.body.secret;
-    const utente = fintoDB.find(
-      (user) => user.username === req.session.username,
-    );
-    if (!utente) {
-      return req.session.destroy(() => {
-        res.send("Utente non trovato nel db, rifai il login");
+    let query = "SELECT * FROM users WHERE username = ?";
+    db.get(query, [req.session.username], (err, row) => {
+      if (err) {
+        console.log("Errore nel database");
+        return res.send("Errore interno");
+      }
+      if (!row) {
+        return req.session.destroy(() => {
+          res.send("Utente non trovato nel db, rifai il login");
+        });
+      }
+      const segreto = req.body.secret;
+      query = "UPDATE users SET secret = ? WHERE username = ?";
+      db.run(query, [segreto, req.session.username], (err) => {
+        if (err) {
+          console.log("Erroe nel caricamento del secret");
+          res.send("Errore interno");
+        } else {
+          return res.redirect("/vault");
+        }
       });
-    }
-    utente.secret = segreto;
-    res.redirect("/vault");
+    });
   });
 
 app
@@ -257,25 +273,24 @@ app
       return res.redirect("/");
     }
     try {
-      const password = req.body.password;
-      const utente = fintoDB.find(
-        (user) => user.username === req.session.username,
-      );
-      if (!utente)
-        return req.session.destroy(() =>
-          res.send("Utente non trovato, rifai login."),
-        );
-      const indice = fintoDB.findIndex(
-        (user) => user.username === req.session.username,
-      );
-      const esito = await bcrypt.compare(password, utente.password);
-      if (!esito) {
-        res.send("Password non valida");
-      } else {
-        fintoDB.splice(indice, 1);
-        req.session.destroy();
-        res.send("Account eliminato con successo");
-      }
+      let query = "DELETE FROM users WHERE username = ?";
+      db.run(query, [req.session.username], function (err) {
+        if (err) {
+          console.log("errore nell'eliminazione della password");
+          return res.send("Errore interno");
+        }
+        if (this.changes === 0) {
+          return req.session.destroy((err) => {
+            if (err) {
+              console.log("Errore nella distruzione della sessione");
+              return res.send("Errore interno");
+            }
+            return res.send("Utente non loggato, rifare il login");
+          });
+        } else {
+          res.send("Account eliminato con successo");
+        }
+      });
     } catch (err) {
       res.send("errore interno");
     }
