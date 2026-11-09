@@ -45,7 +45,7 @@ so each finding is reproducible.
 | --- | --- | --- | --- |
 | [Stored XSS in the vault](docs/xss-vault.md) | XSS | `attacks/xss_vault.py` | 🛠️ In progress |
 | No rate limiting on login | Brute force | `attacks/brute_login.py` | 🔜 Planned |
-| No CSRF protection | CSRF | — | 🔜 Planned |
+| No CSRF protection | CSRF | — | 🛠️ In progress |
 | Duplicate username on register | Logic flaw | — | 🔜 Planned |
 | Weak session cookie flags & fallback secret | Misconfig | — | 🔜 Planned |
 | Hardcoded admin password in source | Hardcoded credentials | — | 🔜 Planned |

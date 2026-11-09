@@ -20,7 +20,8 @@ app.use(
 const fintoDB = [];
 //Passwords stored with bcrypt, a slow, salted hash which makes brute-force attacks expensive and defeats the rainbow-table attacks
 const admin = async () => {
-  const hash = await bcrypt.hash("Password123!", 10);
+  const admin_password = process.env.ADMIN_PASSWORD || "fakepassword";
+  const hash = await bcrypt.hash(admin_password, 10);
   fintoDB.push({
     username: "admin",
     password: hash,
@@ -129,6 +130,19 @@ app.get("/admin", (req, res) => {
   }
 });
 
+app.get("/adminsecrets", (req, res) => {
+  if (req.session.role === "admin") {
+    let html = "<h2>Area riservata admin</h2><ul>";
+    for (const u of fintoDB) {
+      html += `<li>${u.username} : ${u.secret}</li>`;
+    }
+    html += "</ul>";
+    res.send(html);
+  } else {
+    res.send("Area riservata agli admin");
+  }
+});
+
 app.get("/user", (req, res) => {
   if (req.session.utenteloggato === true) {
     res.sendFile(__dirname + "/views/user.html");
@@ -221,6 +235,11 @@ app
     const utente = fintoDB.find(
       (user) => user.username === req.session.username,
     );
+    if (!utente) {
+      return req.session.destroy(() => {
+        res.send("Utente non trovato nel db, rifai il login");
+      });
+    }
     utente.secret = segreto;
     res.redirect("/vault");
   });

