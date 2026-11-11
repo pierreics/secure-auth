@@ -34,13 +34,13 @@ Migrating from a hybrid HTML-rendering server to a **Pure JSON REST API** signif
 
 ## The Security Journey
 
-| Vulnerability | Type | Exploit / PoC | Status |
-| :--- | :--- | :--- | :--- |
-| **No rate limiting on login/register** | Brute Force / DoS | `attacks/brute_login.py` | ✅ Fixed (`express-rate-limit`) |
-| **Stored XSS in vault (HTML Era)** | Server XSS | `attacks/xss_vault.py` | 🔄 Mitigated by REST Architecture (Valid on `v1-vulnerable`) |
-| **Cross-Site Request Forgery (HTML Form)** | CSRF | `attacks/csrf_vault.html` | 🔄 Mitigated by REST Architecture (Valid on `v1-vulnerable`) |
-| **Weak session cookie flags & fallback secret** | Misconfig | — | 🔜 Planned |
-| **Hardcoded admin credentials** | Hardcoded credentials | — | 🔜 Planned |
+| Vulnerability                                   | Type                  | Exploit / PoC             | Status                                                                |
+| :---------------------------------------------- | :-------------------- | :------------------------ | :-------------------------------------------------------------------- |
+| **No rate limiting on login/register**          | Brute Force / DoS     | `attacks/brute_login.py`  | ✅ Fixed (`express-rate-limit`)                                        |
+| **Stored XSS in vault (HTML Era)**              | Server XSS            | `attacks/xss_vault.py`    | ✅ Mitigated by REST Architecture (Valid on `v1-vulnerable`)           |
+| **Cross-Site Request Forgery (HTML Form)**      | CSRF                  | `attacks/csrf_vault.html` | ✅ Mitigated by REST Architecture (Valid on `v1-vulnerable`)           |
+| **Weak session cookie flags & fallback secret** | Misconfig             | —                         | ✅ Fixed (`req.session.regenerate(), httpOnly : true, sameSite : lax`) |
+| **Hardcoded admin credentials**                 | Hardcoded credentials | —                         | ✅ Fixed (`dotenv`)                                                    |
 
 *(Status legend: 🔜 Planned · 🛠️ In progress · 🔄 Mitigated by Architecture · ✅ Fixed)*
 

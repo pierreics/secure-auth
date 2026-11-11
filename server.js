@@ -4,6 +4,8 @@ const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
 const db = require("./database");
 const rateLimit = require("express-rate-limit");
+require("dotenv").config();
+
 const {
   validaPassword,
   sendError,
@@ -11,6 +13,14 @@ const {
   sendInternalError,
 } = require("./utils");
 const app = express();
+
+if (
+  (!process.env.SECRET_KEY || !process.env.ADMIN_PASSWORD) &&
+  process.env.NODE_ENV === "production"
+) {
+  console.error("FATAL ERROR: Manca SECRET_KEY! o ADMIN_PASSWORD");
+  process.exit(1);
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -20,9 +30,15 @@ app.use(
       path: "./sessions",
       retries: 0,
     }),
-    secret: process.env.SECRET_KEY || "chiave_provvisoria",
+    secret: process.env.SECRET_KEY,
     saveUninitialized: false,
     resave: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 1000 * 60 * 60 * 24,
+    },
   }),
 );
 
@@ -34,7 +50,7 @@ const rateLimiter = rateLimit({
   legacyHeaders: false,
   handler: (req, res) => {
     return sendError(res, 429, "Too many requests, try later");
-  }
+  },
 });
 
 let ghost = "";
@@ -91,12 +107,17 @@ app.post("/api/login", rateLimiter, async (req, res) => {
       if (!esito) {
         return sendError(res, 401, "Username or password are not valid");
       } else {
-        req.session.userId = row.id;
-        req.session.username = row.username;
-        req.session.role = row.role;
-        return res.status(200).json({
-          success: true,
-          message: "Login effettuato con successo",
+        req.session.regenerate((err) => {
+          if (err) {
+            return sendInternalError(res, err);
+          }
+          req.session.userId = row.id;
+          req.session.username = row.username;
+          req.session.role = row.role;
+          return res.status(200).json({
+            success: true,
+            message: "Login effettuato con successo",
+          });
         });
       }
     });
@@ -153,7 +174,7 @@ app.get("/api/adminsecrets", requireAuth, (req, res) => {
   }
 });
 
-app.post("/api/changepassword", async (req, res) => {
+app.post("/api/changepassword", requireAuth, async (req, res) => {
   const { oldpassword, newpassword1, newpassword2 } = req.body;
   if (!oldpassword || !newpassword1 || !newpassword2) {
     return sendError(res, 409, "Missing parameters");
