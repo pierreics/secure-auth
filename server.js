@@ -3,6 +3,12 @@ const session = require("express-session");
 const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
 const db = require("./database");
+const {
+  validaPassword,
+  sendError,
+  requireAuth,
+  sendInternalError,
+} = require("./utils");
 const app = express();
 
 app.use(express.json());
@@ -11,7 +17,7 @@ app.use(
   session({
     store: new filestore({
       path: "./sessions",
-      retriesz: 0,
+      retries: 0,
     }),
     secret: process.env.SECRET_KEY || "chiave_provvisoria",
     saveUninitialized: false,
@@ -24,58 +30,13 @@ let ghost = "";
   ghost = await bcrypt.hash("dummy_password", 10);
 })();
 
-//Password complexity policy : enforces length and character variety to reduce the risk of weak, easily-guessable passwords
-function validaPassword(password) {
-  if (
-    typeof password !== "string" ||
-    password.length < 8 ||
-    password.length > 64
-  ) {
-    return false;
-  }
-
-  const hasUppercase = /[A-Z]/.test(password);
-  const hasLowercase = /[a-z]/.test(password);
-  const hasNumbers = /\d/.test(password);
-  const hasSpecialchars = /[!@#$%^&*()_+\-=\[\];':"\\\|,.<>\/?]/.test(password);
-  return hasLowercase && hasUppercase && hasNumbers && hasSpecialchars;
-}
-
-function requireAuth(req, res, next) {
-  if (!req.session.userId) {
-    return res.status(401).json({
-      success: false,
-      error: "Accesso negato, devi effettuare il login"
-    });
-  }
-  next();
-}
-
-app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/views/home.html");
-});
-
-app.get("/register", (req, res) => {
-  res.sendFile(__dirname + "/views/register.html");
-});
-
-app.get("/login", (req, res) => {
-  res.sendFile(__dirname + "/views/login.html");
-});
-
 app.post("/api/register", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      error: "Username o password sono richiesti",
-    });
+    return sendError(res, 400, "Username and password are required");
   }
   if (!validaPassword(password)) {
-    return res.status(400).json({
-      success: false,
-      error: "La password non rispetta i requisiti necessari",
-    });
+    return sendError(res, 400, "Password is not valid");
   }
   try {
     const hash = await bcrypt.hash(password, 10);
@@ -83,15 +44,9 @@ app.post("/api/register", async (req, res) => {
     db.run(query, [username, hash, "user", ""], (err) => {
       if (err) {
         if (err.message.includes("UNIQUE")) {
-          return res.status(409).json({
-            success: false,
-            error: "L'username è gia stato preso",
-          });
+          return sendError(res, 409, "Username is already taken");
         } else {
-          return res.status(500).json({
-            success: false,
-            error: "Errore interno",
-          });
+          return sendError(res, 500, "Internal error", err);
         }
       }
       return res.status(201).json({
@@ -100,44 +55,29 @@ app.post("/api/register", async (req, res) => {
       });
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: "Errore interno",
-    });
+    return sendError(res, 500, "Internal error", err);
   }
 });
 
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      error: "Username e password necessari",
-    });
+    return sendError(res, 400, "Username e password necessari");
   }
   try {
     const query = `SELECT * FROM users WHERE username = ?`;
     db.get(query, [username], async (err, row) => {
       if (err) {
-        return res.status(500).json({
-          success: false,
-          error: "Errore interno",
-        });
+        return sendError(res, 500, "Internal error", err);
       } else if (!row) {
         //Mitigates timing-based user enumeration : even when the user does not exist, we run a dummy bcrypt.compare against a fixed hash so the response time stays constant and does not leak whether the account exists.
         //Generic error message : does not reveal whether the username or the password was wrong to prevent username enumeration.
         await bcrypt.compare(password, ghost);
-        return res.status(401).json({
-          success: false,
-          error: "Username o password non validi",
-        });
+        return sendError(res, 401, "Username or password are not valid");
       }
       const esito = await bcrypt.compare(password, row.password);
       if (!esito) {
-        return res.status(401).json({
-          success: false,
-          error: "Username o password non validi",
-        });
+        return sendError(res, 401, "Username or password are not valid");
       } else {
         req.session.userId = row.id;
         req.session.username = row.username;
@@ -149,218 +89,170 @@ app.post("/api/login", async (req, res) => {
       }
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: "Errore interno",
-    });
+    return sendError(res, 500, "Internal error", err);
   }
 });
 
-app.get("/users/me", requireAuth, (req, res) => {
+app.get("/api/users/me", requireAuth, (req, res) => {
   return res.status(200).json({
     success: true,
     data: {
       id: req.session.userId,
       username: req.session.username,
-      role: req.session.role
-    }
+      role: req.session.role,
+    },
   });
 });
 
 app.post("/api/logout", requireAuth, (req, res) => {
-  req.session.destroy(err => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        error: "Errore interno"
-      });
-    }
-    res.clearCookie('connect.sid');
-    return res.status(200).json({
-      success: true,
-      message: "Logout completato con successo"
-    });
-  });
-});
-
-app.get("/admin", (req, res) => {
-  // Access control: admin-only area -- checks the user role.
-  if (req.session.role === "admin") {
-    res.sendFile(__dirname + "/views/admin.html");
-  } else {
-    res.send("Area riservata agli admin");
-  }
-});
-
-app.get("/adminsecrets", (req, res) => {
-  if (req.session.role === "admin") {
-    let html = "<h2>Area riservata admin</h2><ul>";
-    query = "SELECT username, secret FROM users";
-    db.all(query, [], (err, rows) => {
-      for (const u of rows) {
-        html += `<li>${u.username} : ${u.secret}<li>`;
-      }
-    });
-    res.send(html);
-  } else {
-    res.send("Area riservata agli admin");
-  }
-});
-
-app.get("/user", (req, res) => {
-  if (req.session.utenteloggato === true) {
-    res.sendFile(__dirname + "/views/user.html");
-  } else {
-    res.redirect("/login");
-  }
-});
-
-app.get("/logout", (req, res) => {
   req.session.destroy((err) => {
     if (err) {
-      res.send("Errore nella distruzione della sessione");
-    } else {
-      res.send("Logout effettuato con successo");
+      return sendError(res, 500, "Internal error", err);
     }
+    res.clearCookie("connect.sid");
+    return res.status(200).json({
+      success: true,
+      message: "Logout completato con successo",
+    });
   });
 });
 
-app
-  .route("/changepassword")
-  .get((req, res) => {
-    if (req.session.utenteloggato === true) {
-      res.sendFile(__dirname + "/views/changepassword.html");
-    } else {
-      res.redirect("/login");
-    }
-  })
-  .post(async (req, res) => {
-    // Access control: protected route — requires an authenticated session.
-    if (!req.session.utenteloggato) {
-      return res.redirect("/login");
-    }
-    const oldpassword = req.body.oldpassword;
-    const newpassword1 = req.body.newpassword1;
-    const newpassword2 = req.body.newpassword2;
-    if (!validaPassword(newpassword1)) {
-      return res.send(
-        "Inserire almeno un carattere maiuscolo, minuscolo, numeri e caratteri speciali",
-      );
-    }
-    try {
-      if (newpassword1 !== newpassword2) {
-        return res.send("Le due password non corrisopondono");
+app.get("/api/adminsecrets", requireAuth, (req, res) => {
+  if (req.session.role != "admin") {
+    return sendError(res, 409, "Admin area");
+  }
+  try {
+    query = "SELECT username, secret FROM users";
+    db.all(query, [], (err, row) => {
+      if (err) {
+        return sendError(res, 500, "Internal error", err);
       }
-      let query = "SELECT password FROM users WHERE username = ?";
-      db.get(query, [req.session.username], async (err, row) => {
+      let secrets = row.map((user) => ({
+        user: user.username,
+        secret: user.secret,
+      }));
+      res.status(200).json({
+        success: true,
+        data: secrets,
+      });
+    });
+  } catch (err) {
+    sendError(res, 500, "Internal Error", err);
+  }
+});
+
+app.post("/api/changepassword", async (req, res) => {
+  const { oldpassword, newpassword1, newpassword2 } = req.body;
+  if (!oldpassword || !newpassword1 || !newpassword2) {
+    return sendError(res, 409, "Missing parameters");
+  }
+  if (newpassword1 !== newpassword2) {
+    return sendError(res, 409, "The 2 passwords do not match");
+  }
+  if (!validaPassword(newpassword1)) {
+    return sendError(res, 409, "The new password is too weak");
+  }
+  try {
+    let query = "SELECT password FROM users WHERE username = ?";
+    db.get(query, [req.session.username], async (err, row) => {
+      if (err) {
+        return sendError(res, 500, "Internal error", err);
+      }
+      const esito = await bcrypt.compare(oldpassword, row.password);
+      if (!esito) {
+        return sendError(res, 409, "The password is incorrect");
+      }
+      query = "UPDATE users SET password = ? WHERE username = ?";
+      const password = await bcrypt.hash(newpassword1, 10);
+      db.run(query, [password, req.session.username], (err) => {
         if (err) {
-          console.log("Erroe nella ricerca della password nel db");
-          return res.send("Errore interno");
+          return sendError(res, 500, "Internal error", err);
+        }
+        return res.status(200).json({
+          success: true,
+          message: "Password updated",
+        });
+      });
+    });
+  } catch (err) {
+    return sendError(res, 500, "Internal error", err);
+  }
+});
+
+app
+  .route("/api/vault")
+  .get(requireAuth, (req, res) => {
+    try {
+      query = "SELECT secret  FROM users WHERE username = ? ";
+      db.get(query, req.session.username, (err, row) => {
+        if (err) {
+          return sendError(res, 500, "Internal Error", err);
         }
         if (!row) {
-          return req.session.destroy((err) => {
-            res.send("Utente non trovato, rifare il login");
-          });
+          return sendError(res, 407, "Session Expired", err);
         }
-        const esito = await bcrypt.compare(oldpassword, row.password);
-        if (!esito) {
-          return res.send("Le due password non corrispondono");
-        }
-        let query = "UPDATE users SET password = ? WHERE username = ?";
-        const hash = await bcrypt.hash(newpassword1, 10);
-        db.run(query, [hash, req.session.username], (err) => {
-          if (err) {
-            console.log("Errore nell'aggiornamento della password");
-            return res.send("Errore interno");
-          }
-          return res.send("Aggiornamento fatto");
+        return res.status(200).json({
+          success: true,
+          data: {
+            secret: row.secret,
+          },
         });
       });
     } catch (err) {
-      res.send("Errore nell'hashing");
+      return sendError(res, 500, "Internal Error", err);
     }
-  });
-
-app
-  .route("/vault")
-  .get((req, res) => {
-    if (!req.session.utenteloggato) {
-      return res.redirect("/");
-    }
-    const query = "SELECT * FROM users WHERE username = ?";
-    db.get(query, [req.session.username], (err, row) => {
-      if (!row) {
-        return req.session.destroy(() => {
-          res.redirect("/");
-        });
-      } else {
-        res.send("Secret : " + row.secret);
-      }
-    });
   })
-  .post((req, res) => {
-    if (!req.session.utenteloggato) {
-      return res.redirect("/");
-    }
-    let query = "SELECT * FROM users WHERE username = ?";
-    db.get(query, [req.session.username], (err, row) => {
-      if (err) {
-        console.log("Errore nel database");
-        return res.send("Errore interno");
-      }
-      if (!row) {
-        return req.session.destroy(() => {
-          res.send("Utente non trovato nel db, rifai il login");
-        });
-      }
-      const segreto = req.body.secret;
-      query = "UPDATE users SET secret = ? WHERE username = ?";
-      db.run(query, [segreto, req.session.username], (err) => {
-        if (err) {
-          console.log("Erroe nel caricamento del secret");
-          res.send("Errore interno");
-        } else {
-          return res.redirect("/vault");
-        }
-      });
-    });
-  });
-
-app
-  .route("/deleteaccount")
-  .get((req, res) => {
-    if (!req.session.utenteloggato) {
-      return res.redirect("/");
-    }
-    res.sendFile(__dirname + "/views/deleteaccount.html");
-  })
-  .post(async (req, res) => {
-    if (!req.session.utenteloggato) {
-      return res.redirect("/");
+  .post(requireAuth, (req, res) => {
+    const { secret } = req.body;
+    if (!secret) {
+      return sendError(res, 407, "Secret required");
     }
     try {
-      let query = "DELETE FROM users WHERE username = ?";
-      db.run(query, [req.session.username], function (err) {
+      query = "UPDATE users SET secret = ? WHERE username = ?";
+      db.run(query, [secret, req.session.username], (err) => {
         if (err) {
-          console.log("errore nell'eliminazione della password");
-          return res.send("Errore interno");
+          return sendInternalError(res, err);
         }
-        if (this.changes === 0) {
-          return req.session.destroy((err) => {
-            if (err) {
-              console.log("Errore nella distruzione della sessione");
-              return res.send("Errore interno");
-            }
-            return res.send("Utente non loggato, rifare il login");
-          });
-        } else {
-          res.send("Account eliminato con successo");
-        }
+        return res.status(200).json({
+          success: true,
+          message: "Secret updated",
+        });
       });
     } catch (err) {
-      res.send("errore interno");
+      return sendInternalError(res, err);
     }
   });
+
+app.post("/api/deleteaccount", requireAuth, (req, res) => {
+  const { password } = req.body;
+  try {
+    let query = "SELECT password FROM users WHERE username = ?";
+    db.get(query, [req.session.username], async (err, row) => {
+      if (err) {
+        return sendInternalError(res, err);
+      }
+      if (!row) {
+        return sendError(res, 407, "Authentication expired");
+      }
+      const esito = await bcrypt.compare(password, row.password);
+      if (!esito) {
+        return sendError(res, 407, "Password does not match");
+      }
+      query = "DELETE FROM users  WHERE username = ?";
+      db.run(query, [req.session.username], (err) => {
+        if (err) {
+          return sendInternalError(res, err);
+        }
+        return res.status(200).json({
+          success: true,
+          message: "Account deleted correctly",
+        });
+      });
+    });
+  } catch (err) {
+    return sendInternalError(res, err);
+  }
+});
 
 app.listen(3000, () => {
   console.log("Server attivo sulla porta 3000");

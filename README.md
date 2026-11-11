@@ -1,87 +1,70 @@
-# Secure Auth — Build & Break
+# Secure Auth — Build & Break (JSON REST API)
 
-A small authentication server built with **Node.js** and **Express**, used as a
-hands-on project to learn backend development _and_ web security from both
-sides: I build each feature, then I attack it with my own scripts, then I
-harden it — documenting every step.
+A lightweight authentication and backend server built from scratch using Node.js, Express, and SQLite3. This is used as a hands-on project to learn backend development and web security from both sides: I build each feature, attack it with my own scripts, and then harden it—documenting every step.
 
-> This is a learning project. It intentionally starts with weaknesses so I can
-> exploit and then fix them. Do not use it as-is in production.
+This is a learning project. It intentionally starts with weaknesses so I can exploit and then fix them. Do not use it as-is in production.
 
 ## What it does
+- **User registration** with a strict password-complexity policy
+- **Login / logout** with server-side sessions and secure HttpOnly cookies
+- **User profile retrieval** (`/api/users/me`)
+- **Password change** (verifies current password and hashes the new one)
+- **Account deletion** (requires password verification before removing the user)
+- **Per-user private vault** to store and update a secret
+- **Role-based access control** (isolated standard user / admin areas)
 
-- User **registration** with a password-complexity policy
-- **Login / logout** with server-side sessions
-- **Password change** (verifies the current password)
-- **Account deletion** (verifies the password)
-- A per-user **vault** to store a secret
-- **Role-based** areas (`user` / `admin`)
+## Tech Stack
+Node.js · Express · SQLite3 · express-session · session-file-store · bcrypt
 
-**Stack:** Node.js · Express · express-session · bcrypt
-
-## Security approach
-
+## Security Approach
 Some defenses were built in from the start:
-
-- **Password hashing with bcrypt** — a slow, salted, adaptive hash. The work
-  factor makes brute-force expensive and the per-password salt defeats
-  rainbow-table attacks (unlike fast hashes such as MD5/SHA-256).
-- **Timing-safe user enumeration defense** — when the username does not exist,
-  a dummy `bcrypt.compare` still runs, so the response time stays constant and
-  does not leak whether an account exists.
-- **Generic error messages** — login never reveals whether the username or the
-  password was wrong, to prevent username enumeration from the response content.
-- **Access control** — protected routes require an authenticated session, and
-  the admin area additionally checks the user's role.
+- **Password hashing with bcrypt** — a slow, salted, adaptive hash. The work factor makes brute-force expensive and per-password salts defeat rainbow-table attacks (unlike fast hashes like MD5/SHA-256).
+- **Timing-safe user enumeration defense** — when a username does not exist, a dummy `bcrypt.compare` still runs so the response time stays constant and does not leak whether an account exists.
+- **Generic error messages** — login never reveals whether the username or the password was wrong, preventing username enumeration.
+- **Access control** — protected routes require an authenticated session (`requireAuth` middleware), and the admin route (`/api/adminsecrets`) checks the user's role.
 - **Password complexity policy** — enforced length and character variety.
 
-## The security journey
-
-Each vulnerability is exploited with a script (in `attacks/`), then fixed, then
-written up (in `docs/`). The vulnerable version is kept runnable via a Git tag
-so each finding is reproducible.
-
-| Vulnerability | Type | Exploit | Status |
-| --- | --- | --- | --- |
-| [Stored XSS in the vault](docs/xss-vault.md) | XSS | `attacks/xss_vault.py` | 🛠️ In progress |
-| No rate limiting on login | Brute force | `attacks/brute_login.py` | 🔜 Planned |
-| No CSRF protection | CSRF | — | 🛠️ In progress |
-| Duplicate username on register | Logic flaw | — | 🔜 Planned |
-| Weak session cookie flags & fallback secret | Misconfig | — | 🔜 Planned |
-| Hardcoded admin password in source | Hardcoded credentials | — | 🔜 Planned |
- 
-*(Status: 🔜 Planned · 🛠️ In progress · ✅ Fixed — updated as I go.)*
-## Project structure
-
-```
+## Project Structure
 .
-├── server.js       # the Express server
-├── views/          # HTML pages
+├── server.js       # the Express REST API server
+├── utils.js        # shared helpers (validation, error handler, auth middleware)
+├── database.js     # SQLite database setup and connection
 ├── attacks/        # scripts that exploit this app (my own target only)
 ├── docs/           # write-ups: each vulnerability, exploit, and fix
 └── README.md
-```
 
-## Run it locally
+## Run It Locally
 
-```bash
-npm install
-node server.js
-```
+1. Install dependencies:
+   `npm install`
 
-Then open `http://localhost:3000`.
+2. Start the server:
+   `node server.js`
+   The API will run at `http://localhost:3000`.
 
-Set a session secret via environment variable:
+3. Set a session secret via environment variable if desired:
+   `SECRET_KEY="a-long-random-string" node server.js`
 
-```bash
-SECRET_KEY="a-long-random-string" ADMIN_PASSWORD="another-strong-one" node server.js
-```
+*(Note: Since this is a Pure JSON REST API, test and interact with it using tools like cURL, Postman, or custom test scripts rather than a browser UI).*
+
+## Main API Endpoints Reference
+
+### Public Routes
+- `POST /api/register` — Register a new user
+- `POST /api/login` — Authenticate and create a server session
+
+### Protected Routes (Requires Session Cookie)
+- `GET /api/users/me` — Get current logged-in user info
+- `POST /api/logout` — Destroy session and clear cookie
+- `GET /api/adminsecrets` — View all users and their secrets (Admin only)
+- `POST /api/changepassword` — Update password securely
+- `GET /api/vault` — Retrieve user's private secret
+- `POST /api/vault` — Update user's private secret
+- `POST /api/deleteaccount` — Permanently delete user account
 
 ## Versions
-
 - `v1-vulnerable` — the initial build, before hardening (`git checkout v1-vulnerable`)
 - `main` — the current, progressively hardened version
 
 ## Disclaimer
-
-Built for learning. All attacks target only this application, on my own machine.
+Built for learning purposes. All attacks target only this application, running locally on my own machine.
