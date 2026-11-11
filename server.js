@@ -11,6 +11,9 @@ const {
   sendError,
   requireAuth,
   sendInternalError,
+  registerValidation,
+  loginValidation,
+  vaultValidation
 } = require("./utils");
 const app = express();
 
@@ -30,7 +33,7 @@ app.use(
       path: "./sessions",
       retries: 0,
     }),
-    secret: process.env.SECRET_KEY,
+    secret: process.env.SECRET_KEY || "dev_fallback_secret_key_12345",
     saveUninitialized: false,
     resave: false,
     cookie: {
@@ -58,14 +61,8 @@ let ghost = "";
   ghost = await bcrypt.hash("dummy_password", 10);
 })();
 
-app.post("/api/register", rateLimiter, async (req, res) => {
+app.post("/api/register", rateLimiter, registerValidation, async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) {
-    return sendError(res, 400, "Username and password are required");
-  }
-  if (!validaPassword(password)) {
-    return sendError(res, 400, "Password is not valid");
-  }
   try {
     const hash = await bcrypt.hash(password, 10);
     const query = `INSERT INTO users (username, password, role, secret) VALUES (?, ?, ?, ?)`;
@@ -87,11 +84,8 @@ app.post("/api/register", rateLimiter, async (req, res) => {
   }
 });
 
-app.post("/api/login", rateLimiter, async (req, res) => {
+app.post("/api/login", rateLimiter, loginValidation, async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) {
-    return sendError(res, 400, "Username e password necessari");
-  }
   try {
     const query = `SELECT * FROM users WHERE username = ?`;
     db.get(query, [username], async (err, row) => {
@@ -155,7 +149,7 @@ app.get("/api/adminsecrets", requireAuth, (req, res) => {
     return sendError(res, 409, "Admin area");
   }
   try {
-    query = "SELECT username, secret FROM users";
+    const query = "SELECT username, secret FROM users";
     db.all(query, [], (err, row) => {
       if (err) {
         return sendError(res, 500, "Internal error", err);
@@ -216,7 +210,7 @@ app
   .route("/api/vault")
   .get(requireAuth, (req, res) => {
     try {
-      query = "SELECT secret  FROM users WHERE username = ? ";
+      const query = "SELECT secret  FROM users WHERE username = ? ";
       db.get(query, req.session.username, (err, row) => {
         if (err) {
           return sendError(res, 500, "Internal Error", err);
@@ -235,13 +229,10 @@ app
       return sendError(res, 500, "Internal Error", err);
     }
   })
-  .post(requireAuth, (req, res) => {
+  .post(requireAuth, vaultValidation, (req, res) => {
     const { secret } = req.body;
-    if (!secret) {
-      return sendError(res, 407, "Secret required");
-    }
     try {
-      query = "UPDATE users SET secret = ? WHERE username = ?";
+      const query = "UPDATE users SET secret = ? WHERE username = ?";
       db.run(query, [secret, req.session.username], (err) => {
         if (err) {
           return sendInternalError(res, err);
@@ -276,9 +267,12 @@ app.post("/api/deleteaccount", requireAuth, (req, res) => {
         if (err) {
           return sendInternalError(res, err);
         }
-        return res.status(200).json({
+        req.session.destroy(() => {
+          res.clearCookie("connect.sid");
+          return res.status(200).json({
           success: true,
           message: "Account deleted correctly",
+        });
         });
       });
     });

@@ -27,7 +27,7 @@ function initializeDatabase() {
       async (err, row) => {
         if (!row) {
           //Passwords stored with bcrypt, a slow, salted hash which makes brute-force attacks expensive and defeats the rainbow-table attacks
-          const admin_password = process.env.ADMIN_PASSWORD 
+          const admin_password = process.env.ADMIN_PASSWORD || "admin_weak_password123"; 
           const hash = await bcrypt.hash(admin_password, 10);
           db.run(
             "INSERT INTO users (username, password, role, secret) VALUES (?, ?, ?, ?)",
