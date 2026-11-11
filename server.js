@@ -3,6 +3,7 @@ const session = require("express-session");
 const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
 const db = require("./database");
+const rateLimit = require("express-rate-limit");
 const {
   validaPassword,
   sendError,
@@ -25,12 +26,23 @@ app.use(
   }),
 );
 
+//Ratelimiting as a protection to brute force attacks
+const rateLimiter = rateLimit({
+  windowMs: 1000 * 60 * 10,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    return sendError(res, 429, "Too many requests, try later");
+  }
+});
+
 let ghost = "";
 (async () => {
   ghost = await bcrypt.hash("dummy_password", 10);
 })();
 
-app.post("/api/register", async (req, res) => {
+app.post("/api/register", rateLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return sendError(res, 400, "Username and password are required");
@@ -59,7 +71,7 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", rateLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return sendError(res, 400, "Username e password necessari");
