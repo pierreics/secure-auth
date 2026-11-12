@@ -12,6 +12,8 @@ const db = new sqlite3.Database("./database.db", (err) => {
 
 function initializeDatabase() {
   db.serialize(async () => {
+    db.run("PRAGMA foreign_keys = ON;");
+
     db.run(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,6 +23,16 @@ function initializeDatabase() {
         secret TEXT
       )
       `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id INTEGER PRIMARY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+      `)
 
     db.get(
       "SELECT * FROM users WHERE username = 'admin' ",

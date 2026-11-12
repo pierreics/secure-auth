@@ -4,6 +4,7 @@ const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
 const db = require("./database");
 const rateLimit = require("express-rate-limit");
+const cookieParser = require("cookie-parser");
 require("dotenv").config();
 
 const {
@@ -15,12 +16,19 @@ const {
   loginValidation,
   vaultValidation,
   generateJWTtoken,
-  requireJWTauth
+  requireJWTauth,
+  generateRefreshToken,
+  hashToken,
 } = require("./utils");
 const app = express();
 
+const REFRESH_TOKEN_MS = 1000 * 60 * 60 * 24 * 7;
+const ACCESS_TOKEN_MS = 1000 * 60 * 15;
+
 if (
-  (!process.env.SECRET_KEY || !process.env.ADMIN_PASSWORD|| !process.env.JWT_SECRET) &&
+  (!process.env.SECRET_KEY ||
+    !process.env.ADMIN_PASSWORD ||
+    !process.env.JWT_SECRET) &&
   process.env.NODE_ENV === "production"
 ) {
   console.error("FATAL ERROR: Manca SECRET_KEY o ADMIN_PASSWORD o JWT SECRET");
@@ -28,6 +36,7 @@ if (
 }
 
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   session({
@@ -272,9 +281,9 @@ app.post("/api/deleteaccount", requireAuth, (req, res) => {
         req.session.destroy(() => {
           res.clearCookie("connect.sid");
           return res.status(200).json({
-          success: true,
-          message: "Account deleted correctly",
-        });
+            success: true,
+            message: "Account deleted correctly",
+          });
         });
       });
     });
@@ -286,7 +295,7 @@ app.post("/api/deleteaccount", requireAuth, (req, res) => {
 app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
   const { username, password } = req.body;
   try {
-    const query = "SELECT * FROM users WHERE username = ?";
+    let query = "SELECT * FROM users WHERE username = ?";
     db.get(query, [username], async (err, row) => {
       if (err) {
         return sendInternalError(res, err);
@@ -300,15 +309,31 @@ app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
         return sendError(res, 401, "Username or password are not valid");
       }
       const accessToken = generateJWTtoken(row);
-      res.cookie("accessToken", accessToken, {
-        httpOnly: true,
-        sameSite: strict,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 1000 * 60 * 15
-      });
-      return res.status(200).json({
-        success: true,
-        message : "Login effettuato con successo"
+      const refreshToken = generateRefreshToken();
+      const hashrefreshtoken = hashToken(refreshToken);
+      const timestamp = Date.now() + REFRESH_TOKEN_MS;
+      query =
+        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)";
+      db.run(query, [row.id, hashrefreshtoken, timestamp], (err) => {
+        if (err) {
+          return sendInternalError(res, err);
+        }
+        res.cookie("accessToken", accessToken, {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production",
+          maxAge: ACCESS_TOKEN_MS
+        });
+        res.cookie("refreshToken", refreshToken, {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production",
+          maxAge: REFRESH_TOKEN_MS
+        })
+        return res.status(200).json({
+          success: true,
+          message: "Login effettuato con successo",
+        });
       });
     });
   } catch (err) {
@@ -316,17 +341,47 @@ app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
   }
 });
 
-app.get("/api/jwt/logout", requireJWTauth, (req, res)=> {
-  res.clearCookie("accessToken", {
+app.post("/api/jwt/logout", (req, res) => {
+  if (req.cookies.refreshToken) {
+    const token = hashToken(req.cookies.refreshToken);
+    const query = "DELETE FROM refresh_tokens WHERE token_hash = ?";
+    db.run(query, [token], (err) => {
+      if (err) {
+        return sendInternalError(res, err);
+      }
+        res.clearCookie("accessToken", {
     httpOnly: true,
-    sameSite: strict,
-    secure: process.env.NODE_ENV === "production"
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+  });
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
   });
   return res.status(200).json({
     success: true,
-    message: "Logout completed"
+    message: "Logout completed",
   });
-})
+});
+  }
+else {
+  res.clearCookie("accessToken", {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+  });
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+  });
+  return res.status(200).json({
+    success: true,
+    message: "Logout completed",
+  });
+  }
+});
 
 app.get("/api/jwt/me", requireJWTauth, (req, res) => {
   return res.status(200).json({
@@ -334,8 +389,8 @@ app.get("/api/jwt/me", requireJWTauth, (req, res) => {
     data: {
       id: req.user.sub,
       username: req.user.username,
-      role: req.user.role
-    }
+      role: req.user.role,
+    },
   });
 });
 
@@ -351,8 +406,106 @@ app.get("/api/jwt/vault", requireJWTauth, (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        secret: row.secret
+        secret: row.secret,
+      },
+    });
+  });
+});
+
+app.post("/api/jwt/refresh", (req, res) => {
+  const { refreshToken } = req.cookies;
+  if (!refreshToken) {
+    return sendError(res, 401, "Invalid token");
+  }
+  const hash_Token = hashToken(refreshToken);
+  let query = "SELECT * FROM refresh_tokens WHERE token_hash = ?";
+  db.get(query, [hash_Token], (err, tokenRow) => {
+    if (err) {
+      return sendInternalError(res, err);
+    }
+    if (!tokenRow) {
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: process.env.NODE_ENV === "production"
+      });
+      res.clearCookie("accessToken", {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: process.env.NODE_ENV === "production"
+      });
+
+      return sendError(res, 401, "Invalid token");
+    }
+    if (tokenRow.expires_at < Date.now()) {
+      db.run("DELETE FROM refresh_tokens WHERE id = ?", [tokenRow.id], (err) => {
+        if (err) {
+          return sendInternalError(res, err);
+        }
+        res.clearCookie("refreshToken", {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production"
+        });
+        res.clearCookie("accessToken", {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production"
+        });
+        return sendError(res, 401, "Invalid token");
+      });
+      return;
+    }
+    query = "SELECT * FROM users WHERE id = ?";
+    db.get(query, [tokenRow.user_id], (err, row) => {
+      if (err) {
+        return sendInternalError(res, err);
       }
+      if (!row) {
+        res.clearCookie("refreshToken", {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production"
+        });
+        res.clearCookie("accessToken", {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production"
+        });
+        return sendError(res, 400, "Invalid token");
+      }
+      query = "DELETE from refresh_tokens WHERE id = ?";
+      db.run(query, [tokenRow.id], (err) => {
+        if (err) {
+          return sendInternalError(res, err);
+        }
+        const newaccesstoken = generateJWTtoken(row);
+        const newrefreshtoken = generateRefreshToken();
+        const hashnewrefreshtoken = hashToken(newrefreshtoken);
+        const newexpires_at = Date.now() + REFRESH_TOKEN_MS;
+        query = "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)"
+        db.run(query, [row.id, hashnewrefreshtoken, newexpires_at], (err) => {
+          if (err) {
+            return sendInternalError(res, err);
+          }
+          res.cookie("accessToken", newaccesstoken, {
+            httpOnly: true,
+            sameSite: "strict",
+            secure: process.env.NODE_ENV === "production",
+            maxAge: ACCESS_TOKEN_MS,
+          });
+          res.cookie("refreshToken", newrefreshtoken, {
+            httpOnly: true,
+            sameSite: "strict",
+            secure: process.env.NODE_ENV === "production",
+            maxAge: REFRESH_TOKEN_MS
+          });
+          return res.status(200).json({
+            success: true,
+            message: "Token successfully updated"
+          });
+        });
+      });
     });
   });
 });

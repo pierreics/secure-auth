@@ -1,4 +1,6 @@
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+
 const { body, validationResult } = require("express-validator");
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_fallback_secret_key_67890";
@@ -129,6 +131,14 @@ function requireJWTauth(req, res, next) {
   
 }
 
+function generateRefreshToken() {
+  return crypto.randomBytes(64).toString("hex");
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest(hex);
+}
+
 module.exports = {
   validaPassword,
   sendError,
@@ -138,5 +148,7 @@ module.exports = {
   vaultValidation,
   sendInternalError,
   generateJWTtoken,
-  requireJWTauth
+  requireJWTauth,
+  generateRefreshToken,
+  hashToken
 };
