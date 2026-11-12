@@ -88,7 +88,7 @@ function sendError(res, statusCode, message, err=null) {
 }
 
 function sendInternalError(res, err) {
-  sendError(res, 500, "Internal Error", err);
+  return sendError(res, 500, "Internal Error", err);
 }
 
 function generateJWTtoken(user) {

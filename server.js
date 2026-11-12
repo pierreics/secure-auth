@@ -4,7 +4,6 @@ const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
 const db = require("./database");
 const rateLimit = require("express-rate-limit");
-const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const {
@@ -15,14 +14,13 @@ const {
   registerValidation,
   loginValidation,
   vaultValidation,
-  sendInternalError,
   generateJWTtoken,
   requireJWTauth
 } = require("./utils");
 const app = express();
 
 if (
-  (!process.env.SECRET_KEY || !process.env.ADMIN_PASSWORD|| !process.env.JWT_SECRET||) &&
+  (!process.env.SECRET_KEY || !process.env.ADMIN_PASSWORD|| !process.env.JWT_SECRET) &&
   process.env.NODE_ENV === "production"
 ) {
   console.error("FATAL ERROR: Manca SECRET_KEY o ADMIN_PASSWORD o JWT SECRET");
@@ -288,17 +286,16 @@ app.post("/api/deleteaccount", requireAuth, (req, res) => {
 app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
   const { username, password } = req.body;
   try {
-    query = "SELECT * FROM users WHERE username = ?";
+    const query = "SELECT * FROM users WHERE username = ?";
     db.get(query, [username], async (err, row) => {
       if (err) {
-        sendInternalError(res, err);
+        return sendInternalError(res, err);
       }
       if (!row) {
         await bcrypt.compare(password, ghost);
         return sendError(res, 401, "Username or password are not valid");
       }
-      const esito = await bcrypt.comp
-      are(password, row.password);
+      const esito = await bcrypt.compare(password, row.password);
       if (!esito) {
         return sendError(res, 401, "Username or password are not valid");
       }
@@ -309,11 +306,11 @@ app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
       });
     });
   } catch (err) {
-    sendInternalError(res, err);
+    return sendInternalError(res, err);
   }
 });
 
-app.get("api/jwt/me", requireJWTauth, (req, res) => {
+app.get("/api/jwt/me", requireJWTauth, (req, res) => {
   return res.status(200).json({
     success: true,
     data: {
@@ -324,14 +321,14 @@ app.get("api/jwt/me", requireJWTauth, (req, res) => {
   });
 });
 
-app.get("api/jwt/valut", requireJWTauth, (req, res) => {
-  query = "SELECT secret FROM users WHERE username = ?";
+app.get("/api/jwt/vault", requireJWTauth, (req, res) => {
+  const query = "SELECT secret FROM users WHERE username = ?";
   db.get(query, [req.user.username], (err, row) => {
     if (err) {
-      sendInternalError(res, 500);
+      return sendInternalError(res, err);
     }
     if (!row) {
-      sendError(res, 409, "User not found");
+      return sendError(res, 409, "User not found");
     }
     return res.status(200).json({
       success: true,
