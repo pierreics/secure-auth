@@ -46,6 +46,7 @@ const vaultValidation = [
   validateResult
 ]
 
+
 //Password complexity policy : enforces length and character variety to reduce the risk of weak, easily-guessable passwords
 function validaPassword(password) {
   if (
@@ -87,11 +88,17 @@ function sendInternalError(res, err) {
   sendError(res, 500, "Internal Error", err);
 }
 
+function requireJWTauth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+}
+
 module.exports = {
   validaPassword,
   sendError,
   requireAuth,
   registerValidation,
   loginValidation,
-  vaultValidation
+  vaultValidation,
+  sendInternalError
 };

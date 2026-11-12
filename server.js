@@ -4,6 +4,7 @@ const filestore = require("session-file-store")(session);
 const bcrypt = require("bcrypt");
 const db = require("./database");
 const rateLimit = require("express-rate-limit");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const {
@@ -13,15 +14,16 @@ const {
   sendInternalError,
   registerValidation,
   loginValidation,
-  vaultValidation
+  vaultValidation,
+  sendInternalError
 } = require("./utils");
 const app = express();
 
 if (
-  (!process.env.SECRET_KEY || !process.env.ADMIN_PASSWORD) &&
+  (!process.env.SECRET_KEY || !process.env.ADMIN_PASSWORD|| !process.env.JWT_SECRET||) &&
   process.env.NODE_ENV === "production"
 ) {
-  console.error("FATAL ERROR: Manca SECRET_KEY! o ADMIN_PASSWORD");
+  console.error("FATAL ERROR: Manca SECRET_KEY o ADMIN_PASSWORD o JWT SECRET");
   process.exit(1);
 }
 
