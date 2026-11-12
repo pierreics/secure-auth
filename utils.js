@@ -107,11 +107,16 @@ function generateJWTtoken(user) {
 }
 
 function requireJWTauth(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return sendError(res, 401, "Token mancante o formato non valido");
+  let token = "";
+  if (req.cookies && req.cookies.accessToken) {
+    token = accessToken.split(" ")[1];
   }
-  const token = authHeader.split(" ")[1];
+  else if ( req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+    token = req.headers.authorization.split(" ")[1];
+  }
+  if (!token) {
+    sendError(res, 409, "Invalid token");
+  }
   try {
     const decoded = jwt.verify(token, JWT_SECRET, {
       algorithms: ['HS256']

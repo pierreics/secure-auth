@@ -300,15 +300,33 @@ app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
         return sendError(res, 401, "Username or password are not valid");
       }
       const accessToken = generateJWTtoken(row);
+      res.cookie("accessToken", accessToken, {
+        httpOnly: true,
+        sameSite: strict,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 1000 * 60 * 15
+      });
       return res.status(200).json({
         success: true,
-        accessToken
+        message : "Login effettuato con successo"
       });
     });
   } catch (err) {
     return sendInternalError(res, err);
   }
 });
+
+app.get("/api/jwt/logout", requireJWTauth, (req, res)=> {
+  res.clearCookie("accessToken", {
+    httpOnly: true,
+    sameSite: strict,
+    secure: process.env.NODE_ENV === "production"
+  });
+  return res.status(200).json({
+    success: true,
+    message: "Logout completed"
+  });
+})
 
 app.get("/api/jwt/me", requireJWTauth, (req, res) => {
   return res.status(200).json({
