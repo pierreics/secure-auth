@@ -15,7 +15,9 @@ const {
   registerValidation,
   loginValidation,
   vaultValidation,
-  sendInternalError
+  sendInternalError,
+  generateJWTtoken,
+  requireJWTauth
 } = require("./utils");
 const app = express();
 
@@ -281,6 +283,63 @@ app.post("/api/deleteaccount", requireAuth, (req, res) => {
   } catch (err) {
     return sendInternalError(res, err);
   }
+});
+
+app.post("/api/jwt/login", rateLimiter, loginValidation, (req, res) => {
+  const { username, password } = req.body;
+  try {
+    query = "SELECT * FROM users WHERE username = ?";
+    db.get(query, [username], async (err, row) => {
+      if (err) {
+        sendInternalError(res, err);
+      }
+      if (!row) {
+        await bcrypt.compare(password, ghost);
+        return sendError(res, 401, "Username or password are not valid");
+      }
+      const esito = await bcrypt.comp
+      are(password, row.password);
+      if (!esito) {
+        return sendError(res, 401, "Username or password are not valid");
+      }
+      const accessToken = generateJWTtoken(row);
+      return res.status(200).json({
+        success: true,
+        accessToken
+      });
+    });
+  } catch (err) {
+    sendInternalError(res, err);
+  }
+});
+
+app.get("api/jwt/me", requireJWTauth, (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      id: req.user.sub,
+      username: req.user.username,
+      role: req.user.role
+    }
+  });
+});
+
+app.get("api/jwt/valut", requireJWTauth, (req, res) => {
+  query = "SELECT secret FROM users WHERE username = ?";
+  db.get(query, [req.user.username], (err, row) => {
+    if (err) {
+      sendInternalError(res, 500);
+    }
+    if (!row) {
+      sendError(res, 409, "User not found");
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        secret: row.secret
+      }
+    });
+  });
 });
 
 app.listen(3000, () => {

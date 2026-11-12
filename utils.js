@@ -1,4 +1,7 @@
+const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
+
+const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_fallback_secret_key_67890";
 
 const validateResult = (req, res, next) => {
   const errors = validationResult(req);
@@ -88,8 +91,36 @@ function sendInternalError(res, err) {
   sendError(res, 500, "Internal Error", err);
 }
 
+function generateJWTtoken(user) {
+  return jwt.sign(
+    {
+      sub: user.id,
+      username: user.username,
+      role: user.role
+    },
+    JWT_SECRET,
+    {
+      algorithm: "HS256",
+      expiresIn: "15m"
+    }
+  );
+}
+
 function requireJWTauth(req, res, next) {
   const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return sendError(res, 401, "Token mancante o formato non valido");
+  }
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET, {
+      algorithms: ['HS256']
+    });
+    req.user = decoded;
+    next()
+  } catch (err) {
+    return sendError(res, 401, "invalid Token");
+  }
   
 }
 
@@ -100,5 +131,7 @@ module.exports = {
   registerValidation,
   loginValidation,
   vaultValidation,
-  sendInternalError
+  sendInternalError,
+  generateJWTtoken,
+  requireJWTauth
 };
